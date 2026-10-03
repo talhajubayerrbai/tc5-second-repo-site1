@@ -1,0 +1,103 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: 'Git revision to deploy'
+        required: false
+      udap_run_id:
+        description: 'UDAP run id'
+        required: false
+
+concurrency:
+  group: deploy-${{ vars.TF_STATE_KEY }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.revision || github.sha }}
+      - name: Validate HTML
+        run: |
+          test -f index.html && echo "index.html present" || (echo "index.html missing" && exit 1)
+
+  provision:
+    needs: test
+    runs-on: ubuntu-latest
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ vars.AWS_REGION }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.revision || github.sha }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.10.0"
+      - name: Terraform Init
+        working-directory: infra
+        run: |
+          terraform init -input=false -reconfigure \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="key=${{ vars.TF_STATE_KEY }}" \
+            -backend-config="region=${{ vars.AWS_REGION }}"
+      - name: Terraform Apply
+        working-directory: infra
+        run: terraform apply -input=false -auto-approve
+
+  verify:
+    needs: provision
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for CloudFront and verify HTTP 200
+        run: |
+          URL=$(cat $GITHUB_WORKSPACE/cf_url.txt 2>/dev/null || echo "")
+          # Re-init terraform to get output
+          echo "Getting CloudFront URL from Terraform output..."
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.revision || github.sha }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.10.0"
+      - name: Get CloudFront URL
+        id: get_url
+        working-directory: infra
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: |
+          terraform init -input=false -reconfigure \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="key=${{ vars.TF_STATE_KEY }}" \
+            -backend-config="region=${{ vars.AWS_REGION }}"
+          CF_URL=$(terraform output -raw cloudfront_url)
+          echo "cf_url=$CF_URL" >> $GITHUB_OUTPUT
+      - name: Poll until HTTP 200
+        run: |
+          CF_URL="${{ steps.get_url.outputs.cf_url }}"
+          echo "Polling $CF_URL ..."
+          for i in $(seq 1 30); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$CF_URL")
+            echo "Attempt $i: HTTP $STATUS"
+            if [ "$STATUS" = "200" ]; then
+              echo "Live URL: $CF_URL"
+              exit 0
+            fi
+            sleep 30
+          done
+          echo "CloudFront did not return 200 within 15 minutes"
+          exit 1
