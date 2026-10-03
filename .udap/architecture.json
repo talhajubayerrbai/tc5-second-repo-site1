@@ -1,0 +1,76 @@
+{
+  "edges": [
+    {
+      "from": "cf_dist",
+      "id": "cf_dist-s3_bucket-0",
+      "kind": "routes_to",
+      "props": {},
+      "to": "s3_bucket"
+    },
+    {
+      "from": "site",
+      "id": "site-s3_bucket-0",
+      "kind": "uses",
+      "props": {},
+      "to": "s3_bucket"
+    },
+    {
+      "from": "cf_dist",
+      "id": "cf_dist-site-0",
+      "kind": "serves",
+      "props": {},
+      "to": "site"
+    }
+  ],
+  "groups": [
+    {
+      "id": "tc5_dev_env",
+      "kind": "environment",
+      "name": "tc5-second-repo-dev",
+      "ref": {
+        "id": "env_01a102976f9ebeb1898aa48dba61e4f7",
+        "kind": "environment"
+      }
+    }
+  ],
+  "nodes": [
+    {
+      "group": "tc5_dev_env",
+      "id": "site",
+      "name": "tc5-second-repo-site1",
+      "props": {
+        "bucket": "tc5-second-repo-site1-origin",
+        "cdn": "CloudFront",
+        "provider": "aws",
+        "region": "us-east-1"
+      },
+      "type": "service.static"
+    },
+    {
+      "group": "tc5_dev_env",
+      "id": "s3_bucket",
+      "name": "S3 Origin Bucket",
+      "props": {
+        "name": "tc5-second-repo-site1-origin",
+        "notes": "Private bucket, CloudFront OAC access only"
+      },
+      "type": "resource.bucket"
+    },
+    {
+      "group": "tc5_dev_env",
+      "id": "cf_dist",
+      "name": "CloudFront Distribution",
+      "props": {
+        "domain": "pending.cloudfront.net",
+        "notes": "Default certificate, no WAF, no custom domain",
+        "origin": "tc5-second-repo-site1-origin"
+      },
+      "type": "resource.cdn"
+    }
+  ],
+  "scope": {
+    "id": "proj_01a102976f95cc4915c117b4bfcbd00f",
+    "kind": "project"
+  },
+  "version": 1
+}
