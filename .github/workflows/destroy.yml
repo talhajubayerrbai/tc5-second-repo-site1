@@ -41,17 +41,12 @@ jobs:
       - name: Empty S3 bucket before destroy
         run: |
           BUCKET=tc5-second-repo-site1-origin
-          # Step 1: remove all current-version objects
+          # Remove all current-version objects
           aws s3 rm s3://${BUCKET} --recursive || true
-          # Step 2: paginated deletion of all remaining versions and delete markers
-          NEXT_TOKEN=""
+          # Delete all versions and delete markers in a loop
           while true; do
-            if [ -z "$NEXT_TOKEN" ]; then
-              RESPONSE=$(aws s3api list-object-versions --bucket "$BUCKET" --max-items 1000 --output json 2>/dev/null)
-            else
-              RESPONSE=$(aws s3api list-object-versions --bucket "$BUCKET" --max-items 1000 --starting-token "$NEXT_TOKEN" --output json 2>/dev/null)
-            fi
-            VERSIONS=$(echo "$RESPONSE" | python3 -c "
+            VERSIONS=$(aws s3api list-object-versions --bucket "$BUCKET" --output json 2>/dev/null)
+            OBJECTS=$(echo "$VERSIONS" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
 objs = [{'Key': v['Key'], 'VersionId': v['VersionId']} for v in d.get('Versions', [])]
@@ -59,13 +54,8 @@ objs += [{'Key': v['Key'], 'VersionId': v['VersionId']} for v in d.get('DeleteMa
 if objs:
     print(json.dumps({'Objects': objs, 'Quiet': True}))
 " 2>/dev/null)
-            if [ -n "$VERSIONS" ]; then
-              aws s3api delete-objects --bucket "$BUCKET" --delete "$VERSIONS" || true
-            fi
-            NEXT_TOKEN=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('NextToken',''))" 2>/dev/null)
-            if [ -z "$NEXT_TOKEN" ]; then
-              break
-            fi
+            if [ -z "$OBJECTS" ]; then break; fi
+            aws s3api delete-objects --bucket "$BUCKET" --delete "$OBJECTS" || true
           done
       - name: Terraform Destroy
         working-directory: infra
