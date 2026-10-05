@@ -39,7 +39,19 @@ jobs:
             -backend-config="key=${{ vars.TF_STATE_KEY }}" \
             -backend-config="region=${{ vars.AWS_REGION }}"
       - name: Empty S3 bucket before destroy
-        run: aws s3 rm s3://tc5-second-repo-site1-origin --recursive
+        run: |
+          # Delete all versioned objects
+          VERSIONS=$(aws s3api list-object-versions --bucket tc5-second-repo-site1-origin --query '{Objects: Versions[].{Key:Key,VersionId:VersionId}}' --output json 2>/dev/null)
+          if [ "$VERSIONS" != "null" ] && echo "$VERSIONS" | grep -q 'Key'; then
+            aws s3api delete-objects --bucket tc5-second-repo-site1-origin --delete "$VERSIONS" || true
+          fi
+          # Delete all delete markers
+          MARKERS=$(aws s3api list-object-versions --bucket tc5-second-repo-site1-origin --query '{Objects: DeleteMarkers[].{Key:Key,VersionId:VersionId}}' --output json 2>/dev/null)
+          if [ "$MARKERS" != "null" ] && echo "$MARKERS" | grep -q 'Key'; then
+            aws s3api delete-objects --bucket tc5-second-repo-site1-origin --delete "$MARKERS" || true
+          fi
+          # Remove any remaining current-version objects
+          aws s3 rm s3://tc5-second-repo-site1-origin --recursive || true
       - name: Terraform Destroy
         working-directory: infra
         run: terraform destroy -input=false -auto-approve
