@@ -39,11 +39,7 @@ jobs:
             -backend-config="key=${{ vars.TF_STATE_KEY }}" \
             -backend-config="region=${{ vars.AWS_REGION }}"
       - name: Empty S3 bucket before destroy
-        run: |
-          BUCKET=$(cd infra && terraform output -raw s3_bucket 2>/dev/null || echo "")
-          if [ -n "$BUCKET" ]; then
-            aws s3 rm s3://$BUCKET --recursive || true
-          fi
+        run: aws s3 rm s3://tc5-second-repo-site1-origin --recursive
       - name: Terraform Destroy
         working-directory: infra
         run: terraform destroy -input=false -auto-approve
