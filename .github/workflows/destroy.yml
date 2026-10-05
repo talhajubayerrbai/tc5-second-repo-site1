@@ -41,19 +41,10 @@ jobs:
       - name: Empty S3 bucket before destroy
         run: |
           BUCKET=tc5-second-repo-site1-origin
-          # Remove all current-version objects
           aws s3 rm s3://${BUCKET} --recursive || true
-          # Delete all versions and delete markers in a loop
           while true; do
             VERSIONS=$(aws s3api list-object-versions --bucket "$BUCKET" --output json 2>/dev/null)
-            OBJECTS=$(echo "$VERSIONS" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-objs = [{'Key': v['Key'], 'VersionId': v['VersionId']} for v in d.get('Versions', [])]
-objs += [{'Key': v['Key'], 'VersionId': v['VersionId']} for v in d.get('DeleteMarkers', [])]
-if objs:
-    print(json.dumps({'Objects': objs, 'Quiet': True}))
-" 2>/dev/null)
+            OBJECTS=$(echo "$VERSIONS" | python3 -c "import sys,json; d=json.load(sys.stdin); objs=[{'Key':v['Key'],'VersionId':v['VersionId']} for v in d.get('Versions',[])]+[{'Key':v['Key'],'VersionId':v['VersionId']} for v in d.get('DeleteMarkers',[])]; print(json.dumps({'Objects':objs,'Quiet':True})) if objs else None" 2>/dev/null)
             if [ -z "$OBJECTS" ]; then break; fi
             aws s3api delete-objects --bucket "$BUCKET" --delete "$OBJECTS" || true
           done
